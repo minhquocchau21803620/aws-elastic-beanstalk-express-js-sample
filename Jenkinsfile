@@ -8,14 +8,18 @@ pipeline {
   }
 
   environment {
-    // These come from your docker-compose jenkins service,
-    // but we set them here explicitly so every stage sees them.
-    DOCKER_HOST      = 'tcp://docker:2376'
-    DOCKER_TLS_VERIFY= '1'
-    DOCKER_CERT_PATH = '/certs/client'
+    // DinD over TLS (from your docker-compose)
+    DOCKER_HOST       = 'tcp://docker:2376'
+    DOCKER_TLS_VERIFY = '1'
+    DOCKER_CERT_PATH  = '/certs/client'
 
-    // Image names/tags
-    APP_IMAGE        = "app-ci-image:build"     // local tag during build
+    // Local tag used during build
+    APP_IMAGE  = 'app-ci-image:build'
+    // Repo name on Docker Hub (user part will be injected from credentials)
+    IMAGE_NAME = 'aws-eb-express-sample'
+
+    // Jenkins credentials id for Docker Hub
+    DOCKERHUB_CREDENTIALS_ID = 'dockerhub'
   }
 
   stages {
@@ -73,7 +77,7 @@ pipeline {
     stage('Build Docker Image') {
       steps {
         sh '''
-          # Create a minimal Dockerfile if the repo doesn't have one
+          # Create a minimal Dockerfile if repo has none
           if [ ! -f Dockerfile ]; then
             cat > Dockerfile <<'EOF'
 FROM node:16-alpine
@@ -92,7 +96,6 @@ EOF
     }
 
     stage('Push Image') {
-      when { expression { return env.DOCKERHUB_CREDENTIALS_ID } }  // only if you set credentials ID from job
       steps {
         withCredentials([usernamePassword(
           credentialsId: "${DOCKERHUB_CREDENTIALS_ID}",
@@ -100,12 +103,13 @@ EOF
           passwordVariable: 'DOCKER_PASSWORD'
         )]) {
           sh '''
+            set -eux
             echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-            IMAGE_REPO="${DOCKER_USERNAME}/aws-eb-express-sample"
-            docker tag "$APP_IMAGE" "$IMAGE_REPO:${BUILD_NUMBER}"
-            docker tag "$APP_IMAGE" "$IMAGE_REPO:latest"
-            docker push "$IMAGE_REPO:${BUILD_NUMBER}"
-            docker push "$IMAGE_REPO:latest"
+            REPO="${DOCKER_USERNAME}/${IMAGE_NAME}"
+            docker tag "$APP_IMAGE" "$REPO:${BUILD_NUMBER}"
+            docker tag "$APP_IMAGE" "$REPO:latest"
+            docker push "$REPO:${BUILD_NUMBER}"
+            docker push "$REPO:latest"
           '''
         }
       }
